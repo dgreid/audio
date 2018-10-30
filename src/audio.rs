@@ -1,73 +1,67 @@
-extern crate sample;
+use std::io::{self, Write};
 
-use std::marker::PhantomData;
 
-use sample::{Frame, Signal};
-
-struct CrasStream<'a, F: 'a + Frame + Copy + Clone> {
+struct CrasStream {
     buffer_size: usize,
-    buffer_a: Vec<F>,
-    buffer_b: Vec<F>,
+    buffer_a: Vec<u8>,
+    buffer_b: Vec<u8>,
     which_buffer: bool,
-    frame_type: PhantomData<&'a F>,
 }
 
-impl<'a, F:Frame + Copy + Clone> CrasStream<'a, F> {
-    pub fn new(buffer_size: usize) -> Self {
+impl CrasStream {
+    // TODO(dgreid) support other sample sizes.
+    pub fn new(buffer_size: usize, channel_count: usize) -> Self {
         CrasStream {
             buffer_size,
-            buffer_a: Vec::new(),
-            buffer_b: Vec::new(),
+            buffer_a: vec![0; 2 * buffer_size * channel_count],
+            buffer_b: vec![0; 2 * buffer_size * channel_count],
             which_buffer: false,
-            frame_type: PhantomData,
         }
     }
 
-//    pub fn next_buffer(&mut self) -> std::result::Result<impl Signal<Frame=F>, ()> {
- //       Err(())
-  //  }
-
-//    pub fn next_buffer(&mut self) -> signal::Take<Signal<Frame=F>> {
- //       self.sine.take(self.buffer_size)
-  //  }
-  //
-    pub fn next_block(&mut self) -> StreamBlock<F> {
-        StreamBlock::new(&mut self.buffer_a)
+    pub fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a> {
+        PlaybackBuffer::new(self)
     }
 
-    pub fn next_block_iter(&mut self) -> impl Iterator<Item = &mut F> {
-        self.buffer_a.iter_mut()
+    fn buffer_complete(&mut self) {
+        self.which_buffer = !self.which_buffer;
+        // TODO - update write pointer.
     }
 }
 
-impl<'a, F: Frame> Iterator for CrasStream<'a, F>
-{
-    type Item = Iterator<Item = F>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(self.next_block_iter())
-    }
+struct PlaybackBuffer<'a> {
+    stream: &'a mut CrasStream,
+    offset: usize, // Write offset in frames.
 }
 
-struct StreamBlock<'a, F: 'static + Frame + Copy + Clone> {
-    buffer: &'a mut [F],
-    frame_type: PhantomData<F>,
-}
-
-impl<'a, F: Frame + Copy + Clone> StreamBlock<'a, F> {
-    pub fn new(buffer: &'a mut [F]) -> Self {
-        StreamBlock {
-            buffer,
-            frame_type: PhantomData,
+impl<'a> PlaybackBuffer<'a> {
+    pub fn new(stream: &'a mut CrasStream) -> Self {
+        PlaybackBuffer {
+            stream,
+            offset: 0,
         }
     }
 }
 
-impl<'a, F: Frame + Default> Signal for StreamBlock<'a, F> {
-    type Frame = F;
+impl<'a> Write for PlaybackBuffer<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = if self.stream.which_buffer {
+            (&mut self.stream.buffer_a[self.offset..]).write(buf)?
+        } else {
+            (&mut self.stream.buffer_b[self.offset..]).write(buf)?
+        };
+        self.offset += written;
+        Ok(written)
+    }
 
-    fn next(&mut self) -> Self::Frame {
-        Default::default()
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> Drop for PlaybackBuffer<'a> {
+    fn drop(&mut self) {
+        self.stream.buffer_complete();
     }
 }
 
@@ -77,15 +71,8 @@ mod tests {
 
     #[test]
     fn sixteen_bit_stereo() {
-        let mut stream: CrasStream<[i16; 2]> = CrasStream::new(480);
-        let mut signal = stream.next_block().take(3);
-        assert_eq!(signal.next(), Some([0,0]));
-    }
-
-    #[test]
-    fn get_mut_iter() {
-        let mut stream: CrasStream<[i16; 2]> = CrasStream::new(480);
-        let mut signal = stream.next_block_iter().take(3);
-        assert_eq!(signal.next(), Some(&mut [0,0]));
+        let mut stream = CrasStream::new(480, 2);
+        let mut buffer = stream.next_playback_buffer();
+        assert_eq!(buffer.write(&vec![0xa5; 10]).unwrap(), 10);
     }
 }
