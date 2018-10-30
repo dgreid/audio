@@ -51,7 +51,7 @@ impl<'a> Write for PlaybackBuffer<'a> {
             (&mut self.stream.buffer_b[self.offset..]).write(buf)?
         };
         self.offset += written;
-        Ok(written)
+        Ok(written/4)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -72,7 +72,8 @@ mod tests {
     #[test]
     fn sixteen_bit_stereo() {
         let mut stream = CrasStream::new(480, 2);
-        let mut buffer = stream.next_playback_buffer();
-        assert_eq!(buffer.write(&vec![0xa5; 10]).unwrap(), 10);
+        let mut stream_buffer = stream.next_playback_buffer();
+        let pb_buf = [0xa5a5u16; 480];
+        assert_eq!(stream_buffer.write(&pb_buf).unwrap(), 480);
     }
 }
