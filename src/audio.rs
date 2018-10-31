@@ -1,38 +1,14 @@
 extern crate sample;
 
-use std::io::{self, Write};
+use std::io;
 
 use sample::Frame;
 
-trait AudioBufferStream<F: Default + Frame> {
+pub trait PlaybackBufferStream<F: Default + Frame> {
     fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a, F>;
 }
 
-struct CrasStream<F: Frame + Default> {
-    buffer_size: usize,
-    buffer_a: Vec<F>,
-    buffer_b: Vec<F>,
-    which_buffer: bool,
-}
-
-impl<F: Default + Frame> CrasStream<F> {
-    pub fn new(buffer_size: usize) -> Self {
-        CrasStream {
-            buffer_size,
-            buffer_a: vec![Default::default(); buffer_size],
-            buffer_b: vec![Default::default(); buffer_size],
-            which_buffer: false,
-        }
-    }
-}
-
-impl<F: Default + Frame> AudioBufferStream<F> for CrasStream<F> {
-    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a, F> {
-        PlaybackBuffer::new(&mut self.which_buffer, &mut self.buffer_a) // TODO buffer select
-    }
-}
-
-struct PlaybackBuffer<'a, F: 'a + Default + Frame> {
+pub struct PlaybackBuffer<'a, F: 'a + Default + Frame> {
     done_toggle: &'a mut bool,
     buffer: &'a mut [F],
     offset: usize, // Write offset in frames.
@@ -64,13 +40,34 @@ impl<'a, F: Default + Frame> Drop for PlaybackBuffer<'a, F> {
     }
 }
 
+/// Stream that accepts playback samples but drops them.
+pub struct DummyStream<F: Frame + Default> {
+    buffer: Vec<F>,
+    which_buffer: bool,
+}
+
+impl<F: Default + Frame> DummyStream<F> {
+    pub fn new(buffer_size: usize) -> Self {
+        DummyStream {
+            buffer: vec![Default::default(); buffer_size],
+            which_buffer: false,
+        }
+    }
+}
+
+impl<F: Default + Frame> PlaybackBufferStream<F> for DummyStream<F> {
+    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a, F> {
+        PlaybackBuffer::new(&mut self.which_buffer, &mut self.buffer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn sixteen_bit_stereo() {
-        let mut stream: CrasStream<[u16; 2]> = CrasStream::new(480);
+        let mut stream: DummyStream<[u16; 2]> = DummyStream::new(480);
         let mut stream_buffer = stream.next_playback_buffer();
         let pb_buf = [[0xa5a5u16; 2]; 480];
         assert_eq!(stream_buffer.write_samples(&pb_buf).unwrap(), 480);
