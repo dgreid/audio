@@ -16,7 +16,6 @@ struct CrasStream<F: Frame + Default> {
 }
 
 impl<F: Default + Frame> CrasStream<F> {
-    // TODO(dgreid) support other sample sizes.
     pub fn new(buffer_size: usize) -> Self {
         CrasStream {
             buffer_size,
@@ -34,15 +33,15 @@ impl<F: Default + Frame> AudioBufferStream<F> for CrasStream<F> {
 }
 
 struct PlaybackBuffer<'a, F: 'a + Default + Frame> {
-    stream: &'a mut bool,
+    done_toggle: &'a mut bool,
     buffer: &'a mut [F],
     offset: usize, // Write offset in frames.
 }
 
 impl<'a, F: Default + Frame> PlaybackBuffer<'a, F> {
-    pub fn new(stream: &'a mut bool, buffer: &'a mut [F]) -> Self {
+    pub fn new(done_toggle: &'a mut bool, buffer: &'a mut [F]) -> Self {
         PlaybackBuffer {
-            stream,
+            done_toggle,
             buffer,
             offset: 0,
         }
@@ -61,7 +60,7 @@ impl<'a, F: Default + Frame> PlaybackBuffer<'a, F> {
 
 impl<'a, F: Default + Frame> Drop for PlaybackBuffer<'a, F> {
     fn drop(&mut self) {
-        *self.stream = !*self.stream;
+        *self.done_toggle = !*self.done_toggle;
     }
 }
 
