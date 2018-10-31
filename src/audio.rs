@@ -1,5 +1,8 @@
 use std::io::{self, Write};
 
+trait AudioBufferStream {
+    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a>;
+}
 
 struct CrasStream {
     buffer_size: usize,
@@ -19,13 +22,15 @@ impl CrasStream {
         }
     }
 
-    pub fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a> {
-        PlaybackBuffer::new(self)
-    }
-
     fn buffer_complete(&mut self) {
         self.which_buffer = !self.which_buffer;
         // TODO - update write pointer.
+    }
+}
+
+impl AudioBufferStream for CrasStream {
+    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a> {
+        PlaybackBuffer::new(self)
     }
 }
 
@@ -73,7 +78,7 @@ mod tests {
     fn sixteen_bit_stereo() {
         let mut stream = CrasStream::new(480, 2);
         let mut stream_buffer = stream.next_playback_buffer();
-        let pb_buf = [0xa5a5u16; 480];
-        assert_eq!(stream_buffer.write(&pb_buf).unwrap(), 480);
+        let pb_buf = [0xa5u8; 480];
+        assert_eq!(stream_buffer.write(&pb_buf[..]).unwrap(), 480);
     }
 }
