@@ -1,72 +1,67 @@
+extern crate sample;
+
 use std::io::{self, Write};
 
-trait AudioBufferStream {
-    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a>;
+use sample::Frame;
+
+trait AudioBufferStream<F: Default + Frame> {
+    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a, F>;
 }
 
-struct CrasStream {
+struct CrasStream<F: Frame + Default> {
     buffer_size: usize,
-    buffer_a: Vec<u8>,
-    buffer_b: Vec<u8>,
+    buffer_a: Vec<F>,
+    buffer_b: Vec<F>,
     which_buffer: bool,
 }
 
-impl CrasStream {
+impl<F: Default + Frame> CrasStream<F> {
     // TODO(dgreid) support other sample sizes.
-    pub fn new(buffer_size: usize, channel_count: usize) -> Self {
+    pub fn new(buffer_size: usize) -> Self {
         CrasStream {
             buffer_size,
-            buffer_a: vec![0; 2 * buffer_size * channel_count],
-            buffer_b: vec![0; 2 * buffer_size * channel_count],
+            buffer_a: vec![Default::default(); buffer_size],
+            buffer_b: vec![Default::default(); buffer_size],
             which_buffer: false,
         }
     }
+}
 
-    fn buffer_complete(&mut self) {
-        self.which_buffer = !self.which_buffer;
-        // TODO - update write pointer.
+impl<F: Default + Frame> AudioBufferStream<F> for CrasStream<F> {
+    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a, F> {
+        PlaybackBuffer::new(&mut self.which_buffer, &mut self.buffer_a) // TODO buffer select
     }
 }
 
-impl AudioBufferStream for CrasStream {
-    fn next_playback_buffer<'a>(&'a mut self) -> PlaybackBuffer<'a> {
-        PlaybackBuffer::new(self)
-    }
-}
-
-struct PlaybackBuffer<'a> {
-    stream: &'a mut CrasStream,
+struct PlaybackBuffer<'a, F: 'a + Default + Frame> {
+    stream: &'a mut bool,
+    buffer: &'a mut [F],
     offset: usize, // Write offset in frames.
 }
 
-impl<'a> PlaybackBuffer<'a> {
-    pub fn new(stream: &'a mut CrasStream) -> Self {
+impl<'a, F: Default + Frame> PlaybackBuffer<'a, F> {
+    pub fn new(stream: &'a mut bool, buffer: &'a mut [F]) -> Self {
         PlaybackBuffer {
             stream,
+            buffer,
             offset: 0,
         }
     }
-}
 
-impl<'a> Write for PlaybackBuffer<'a> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = if self.stream.which_buffer {
-            (&mut self.stream.buffer_a[self.offset..]).write(buf)?
-        } else {
-            (&mut self.stream.buffer_b[self.offset..]).write(buf)?
-        };
-        self.offset += written;
-        Ok(written/4)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+    pub fn write_samples(&mut self, samples: &[F]) -> io::Result<usize> {
+        let s = &mut self.buffer[self.offset..];
+        let mut i = 0;
+        for sample in samples {
+            s[i] = *sample;
+            i+=1;
+        }
+        Ok(i)
     }
 }
 
-impl<'a> Drop for PlaybackBuffer<'a> {
+impl<'a, F: Default + Frame> Drop for PlaybackBuffer<'a, F> {
     fn drop(&mut self) {
-        self.stream.buffer_complete();
+        *self.stream = !*self.stream;
     }
 }
 
@@ -76,9 +71,9 @@ mod tests {
 
     #[test]
     fn sixteen_bit_stereo() {
-        let mut stream = CrasStream::new(480, 2);
+        let mut stream: CrasStream<[u16; 2]> = CrasStream::new(480);
         let mut stream_buffer = stream.next_playback_buffer();
-        let pb_buf = [0xa5u8; 480];
-        assert_eq!(stream_buffer.write(&pb_buf[..]).unwrap(), 480);
+        let pb_buf = [[0xa5a5u16; 2]; 480];
+        assert_eq!(stream_buffer.write_samples(&pb_buf).unwrap(), 480);
     }
 }
